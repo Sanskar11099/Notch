@@ -6,6 +6,10 @@
 </p>
 
 <p align="center">
+  <b>Made for the Windows operating system (Windows 10 and 11).</b> It is a native Windows app, not a cross-platform one.
+</p>
+
+<p align="center">
   <img alt="Windows 10/11" src="https://img.shields.io/badge/Windows-10%20%2F%2011-0078D4?logo=windows&logoColor=white">
   <img alt="Rust" src="https://img.shields.io/badge/Rust-Win32%20%2B%20Direct2D-CE422B?logo=rust&logoColor=white">
   <img alt="Executable size" src="https://img.shields.io/badge/exe-~0.4%20MB-2ea44f">
@@ -20,7 +24,7 @@
 
 Kick off a long task in Claude Code, Codex or Copilot, switch to another window, and stop checking back. **Notch lives at the top-center of your screen, hides under the camera line when idle, and slides out the moment something happens**: an agent finishes, needs your input, a song changes, you plug in the charger or press a volume key.
 
-Written in plain Rust on the Win32 API with Direct2D. No Electron, no browser engine, no runtime to install.
+Notch is a **Windows application**: it uses Windows' own media controls, power and device notifications, location service and privacy log, so it runs on Windows 10 and 11 only (not macOS or Linux). It is written in plain Rust on the Win32 API with Direct2D. No Electron, no browser engine, no runtime to install.
 
 ## Features
 
@@ -44,6 +48,53 @@ Written in plain Rust on the Win32 API with Direct2D. No Electron, no browser en
 ```
 
 It stays out of the way: with nothing happening it is invisible, and it never takes over a notch you have open.
+
+## Everything it does
+
+### AI agents, in your terminal or editor
+- **Works with** Claude Code, Codex, GitHub Copilot, and any command-line tool or script that can run `notch.exe` (see [Connect your agents](#connect-your-agents)). It also runs inside VS Code terminals.
+- **Working state:** a dot and a short label appear on the collapsed notch while an agent runs, for example `claude · VS Code`.
+- **Finished or stuck:** when a run ends or needs your input, the notch slides out with a **Done** or **Needs attention** popup and a chime. The popup names the agent, the project and the app, for example `Project Notch · VS Code · Task complete`.
+- **Click to jump back:** click the popup and Windows brings the window that agent was running in to the front.
+- **Several at once:** each session is tracked on its own, so two Claude Code windows, or Claude and Codex together, never clear each other. With more than one running it shows `N working`.
+- **Live step feed:** hover the notch while an agent works to see the task you gave it, its latest steps with the current one lit, the elapsed time and the step count.
+- **Interrupted runs** (Esc, errors) are cleared quietly with no false "Done".
+
+### Music
+- Shows what is playing from any app that uses Windows media controls (Spotify, browsers, media players): artwork, title and artist, and an animated equalizer.
+- Expanded view has previous / play-pause / next, a **progress bar you can click to seek**, and a **volume slider with mute** (the system volume, same as the keyboard keys).
+
+### System information
+- **System page:** battery (the icon turns green while the charger is connected), CPU, memory, disk, network speed, GPU load and temperature.
+- **Devices page:** a widget for the active connection (Wi-Fi name and signal, or Ethernet, with speed) and the battery level of every connected Bluetooth device.
+- Pages stack vertically: scroll with the mouse wheel or click the dots. Values only refresh while you are looking at them.
+
+### Glance strip
+Touch the top edge when nothing else is going on and the notch shows the **time**, the **battery** and the **connection**, plus the **weather** (a condition symbol and temperature in °C) for where you are.
+
+### System popups
+The notch slides out briefly, then hides again, for: charger plugged in or removed, battery low (20%) and critical (10%) with a chime, fully charged, a Bluetooth device connecting (with its battery) or disconnecting, Wi-Fi or Ethernet connecting, dropping or switching, and a **volume and brightness HUD** with a level bar when you use the volume or brightness keys. It never takes over a notch you have open.
+
+### Microphone and camera indicator
+An orange microphone or green camera icon appears whenever any app is using them, like the privacy dot on a phone.
+
+### Look and behavior
+- **Tinted-glass** design with smooth spring animation, sharp on high-DPI screens.
+- **Three modes:** hidden under the camera line, a peek when you touch the edge, and the full view when you hover the notch.
+- **Starts at login** and runs in the background. Right-click the notch for the menu (Quit).
+
+## Chrome extension
+
+A small **Manifest V3 Chrome extension** (in the [`extension`](extension) folder) lets the notch follow AI chats in your browser the same way it follows terminal agents.
+
+- **Sites:** ChatGPT (`chatgpt.com`, `chat.openai.com`), **Claude.ai** and **Gemini** (`gemini.google.com`).
+- **What you get:** a working dot while the AI is writing its answer, then a **Done** popup with the chat's title and a chime when it finishes. It works while the tab is in the background, so you can switch to other work and get pinged. Two tabs on the same site are tracked separately.
+- **How it detects it:** it watches for the site's **Stop** button, which exists only while an answer is being generated. The popup only fires after the button has stayed gone for about 2 seconds, so the short pauses between thinking and writing don't count as finished.
+- **Light:** it reacts to page changes (sampled at most every 0.4 s) instead of running a timer, so it adds almost nothing to the page.
+- **Private:** the extension never reads your conversation. It sends only the agent name, a status and the tab's title, and only to `127.0.0.1:47615`, the notch running on your own machine. If the notch isn't running, it does nothing.
+- **Install:** open `chrome://extensions`, turn on **Developer mode**, click **Load unpacked** and choose the `extension` folder (after `deploy.ps1`, a copy that doesn't depend on the source folder is in `%LOCALAPPDATA%\Notch\extension`). After updating it, press its reload button.
+- **Other Chromium browsers** such as Edge can load the same folder, but the popup will still say Chrome.
+- **If a site redesigns,** the Stop button selectors in `content.js` are the one thing that may need updating.
 
 ## How it works
 
@@ -98,7 +149,7 @@ If the notch isn't running the command exits in about 80 ms and does nothing, so
 
 **Codex** and **Copilot** use their own hook files and call the installed wrapper at `~/.notch/notch.cmd`, which `deploy.ps1` writes for you.
 
-**Browser AI sites:** open `chrome://extensions`, enable *Developer mode*, choose *Load unpacked* and select the `extension` folder (the installed copy is in `%LOCALAPPDATA%\Notch\extension`).
+**Browser AI sites:** install the Chrome extension, see [Chrome extension](#chrome-extension).
 
 The wire format is a single tab-separated line, sent raw over TCP or as an HTTP POST body:
 
