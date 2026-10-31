@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "Notch Bridge",
+  "version": "0.1.0",
+  "description": "Tells the Windows Notch when an AI chat starts and finishes responding.",
+  "host_permissions": ["http://127.0.0.1:47615/*"],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://chat.openai.com/*",
+        "https://claude.ai/*",
+        "https://gemini.google.com/*"
+      ],
+      "js": ["detector.js", "content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
