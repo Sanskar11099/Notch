@@ -1820,7 +1820,9 @@ fn create_app(hwnd: HWND) -> Result<App> {
 
         let factory: ID2D1Factory = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)?;
         let props = D2D1_RENDER_TARGET_PROPERTIES {
-            r#type: D2D1_RENDER_TARGET_TYPE_DEFAULT,
+            // Software, not the GPU: the surface is tiny, and a GPU device reset (sleep/wake, driver update) would
+            // otherwise leave every later EndDraw failing with "recreate target" while the rest of the app lives on.
+            r#type: D2D1_RENDER_TARGET_TYPE_SOFTWARE,
             pixelFormat: D2D1_PIXEL_FORMAT {
                 format: DXGI_FORMAT_B8G8R8A8_UNORM,
                 alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED,
