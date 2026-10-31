@@ -34,7 +34,7 @@ Notch is a **Windows application**: it uses Windows' own media controls, power a
 | **Live step feed** | Hover the notch while an agent works and see its current step, the last few steps, elapsed time and step count. |
 | **Browser AI** | A small Chrome extension reports when **ChatGPT**, **Claude.ai** and **Gemini** start and finish answering, so a background tab can ping you too. |
 | **Music** | Now playing from any Windows media app: artwork, animated equalizer, transport controls, a progress bar you can seek, and a volume slider with mute. |
-| **System page** | Battery (turns green while charging), CPU, memory, disk, network speed, GPU and temperature. A second page shows the connection (Wi-Fi or Ethernet) and the battery level of every connected Bluetooth device. |
+| **System pages** | A widget page first (temperature, the connection with Wi-Fi signal and speed, and the battery level of every connected Bluetooth device), then the system info page: battery (turns green while charging), CPU, GPU, memory, disk and network speed. |
 | **Glance strip** | Touch the top edge when nothing is going on: time, battery and connection at a glance, plus **the weather** where you are. |
 | **System popups** | Charger plugged or unplugged, low and critical battery, fully charged, Bluetooth device connected (with its battery), network connected, dropped or switched, and a **volume and brightness HUD**. |
 | **Privacy dot** | An orange microphone or green camera icon appears whenever any app is using them. |
@@ -65,8 +65,8 @@ It stays out of the way: with nothing happening it is invisible, and it never ta
 - Expanded view has previous / play-pause / next, a **progress bar you can click to seek**, and a **volume slider with mute** (the system volume, same as the keyboard keys).
 
 ### System information
-- **System page:** battery (the icon turns green while the charger is connected), CPU, memory, disk, network speed, GPU load and temperature.
-- **Devices page:** a widget for the active connection (Wi-Fi name and signal, or Ethernet, with speed) and the battery level of every connected Bluetooth device.
+- **Widget page (first):** tiles for the temperature, the active connection (Wi-Fi name, signal and speed, or Ethernet) and the battery level of every connected Bluetooth device.
+- **System info page (second):** battery (the icon turns green while the charger is connected), CPU, GPU load, memory, disk and network speed.
 - Pages stack vertically: scroll with the mouse wheel or click the dots. Values only refresh while you are looking at them.
 
 ### Glance strip

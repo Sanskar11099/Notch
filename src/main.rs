@@ -193,7 +193,7 @@ struct App {
     tiny: IDWriteTextFormat,      // device names under the rings
     label: IDWriteTextFormat, // system page: row names (left, vertically centred)
     value: IDWriteTextFormat, // system page: row values (right-aligned)
-    page: u8,                 // expanded view: 0 = music, 1 = system (agent popups override both)
+    page: u8,                 // expanded view: 0 = music, 1 = widgets, 2 = system info, 3 = agents (popups override all)
     page_spring: Spring,      // animated scroll position between pages (settles on `page`)
     stats: Stats,
     sampler: Sampler,
@@ -645,7 +645,7 @@ fn update_eq_timer(hwnd: HWND, app: &mut App) {
     }
 }
 
-// Pages 1 (system) and 2 (devices) need live stats; each samples only its own data.
+// Pages 1 (devices widgets) and 2 (system info) need live stats; each samples only its own data.
 fn sample_page(app: &mut App) {
     // What to sample follows the timer's mode (a stats page, or the glance strip), not just the current page.
     match app.sys_page.unwrap_or(app.page) {
@@ -653,8 +653,8 @@ fn sample_page(app: &mut App) {
             refresh_volume(app);
             refresh_timeline(app);
         }
-        1 => app.stats = app.sampler.sample_system(),
-        2 => app.stats = app.sampler.sample_devices(),
+        1 => app.stats = app.sampler.sample_devices(),
+        2 => app.stats = app.sampler.sample_system(),
         GLANCE_PAGE => app.stats = app.sampler.sample_glance(),
         _ => {}
     }
@@ -707,7 +707,7 @@ fn on_sys_tick(hwnd: HWND) {
             }
             // Settle into the steady cadence: 1 s for the live system page, slower for temperature/Bluetooth and
             // for the glance strip (its clock only changes by the minute).
-            let ms = if on_glance { GLANCE_MS } else if app.page == 2 { DEVICES_MS } else { SYS_MS };
+            let ms = if on_glance { GLANCE_MS } else if app.page == 1 { DEVICES_MS } else { SYS_MS };
             unsafe { SetTimer(Some(hwnd), SYS_TIMER_ID, ms, None) };
         }
     });
@@ -1110,8 +1110,8 @@ unsafe fn draw_content(app: &App, x: f32, w: f32, h: f32, s: f32, a: f32, lift: 
             app.rt.SetTransform(&Matrix3x2 { M11: 1.0, M12: 0.0, M21: 0.0, M22: 1.0, M31: 0.0, M32: dy + lift });
             match page {
                 0 => result = draw_music(app, x, w, s, a),
-                1 => draw_system(app, x, w, s, a),
-                2 => draw_devices(app, x, s, a),
+                1 => draw_devices(app, x, s, a), // the widget page comes first...
+                2 => draw_system(app, x, w, s, a), // ...then the system info page
                 _ => draw_agents(app, x, w, s, a),
             }
         }

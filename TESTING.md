@@ -97,7 +97,7 @@ Not wired: "needs attention" (Copilot's permission/notification events fire too 
 | Press the keyboard volume keys, or change volume anywhere else, while the music page is open | The slider and icon follow within about a second; they are re-read only while the music page is open |
 
 ## 4b. System page
-1. Hover over the notch. It opens on the music page if a player exists, otherwise straight on the system page.
+1. Hover over the notch. It opens on the music page if a player exists, otherwise straight on the widgets page (temperature, connection, Bluetooth). Scroll down once more for the system info page (battery, CPU, GPU, memory, disk, network).
 2. The pages are stacked vertically. Scroll the mouse wheel **down** over the open notch to slide to the next page (system), **up** to go back to music (the content slides up/down with a small spring). Or click one of the two dots in the vertical strip on the right edge.
 3. The system page shows Battery (or "Charging" / "Power: Plugged in" on a desktop), CPU, Memory and Disk C: as labelled bars (GPU sits under CPU: it is the busiest GPU engine, the way Task Manager reports it; it shows a dash for the first fraction of a second, or if Windows has no GPU counters; open a game, a video or a WebGL page to see it move), plus a Network row with download (down arrow) and upload (up arrow) speed. Network counts physical, connected adapters only (Wi-Fi/Ethernet; VPN and virtual adapters are not added on top). Start a big download to see it move; it reads 0 for the first second after opening the page.
 
