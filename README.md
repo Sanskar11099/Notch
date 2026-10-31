@@ -11,6 +11,7 @@
   <img alt="Executable size" src="https://img.shields.io/badge/exe-~0.4%20MB-2ea44f">
   <img alt="Idle cost" src="https://img.shields.io/badge/idle-0%25%20CPU%20%C2%B7%20~3%20MB%20RAM-2ea44f">
   <img alt="Tests" src="https://img.shields.io/badge/tests-55%20passing-2ea44f">
+  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-blue"></a>
 </p>
 
 ---
@@ -160,6 +161,10 @@ cargo build --release   # opt-level z, LTO, panic=abort, stripped
 - The volume HUD follows the output device that was the default when the notch started.
 - The microphone indicator only shows what Windows logs; some old-style recording APIs are not logged.
 - Windows only, and the Chrome extension is loaded unpacked (it is not on the Web Store).
+
+## License
+
+[MIT](LICENSE) © 2026 Sanskar Kumar. Use it, change it, share it.
 
 ---
 
