@@ -203,7 +203,7 @@ mod tests {
     }
 
     fn wifi(name: &str) -> Option<NetLink> {
-        Some(NetLink { kind: LinkKind::WiFi, name: name.into(), signal: Some(80), speed_bps: 866_000_000 })
+        Some(NetLink { kind: LinkKind::WiFi, name: name.into(), signal: Some(80) })
     }
 
     #[test]
@@ -212,7 +212,7 @@ mod tests {
         assert_eq!((n.title.as_str(), n.detail.as_str()), ("Connected", "Home"));
         let n = network_notice(&wifi("Home"), &None).unwrap();
         assert_eq!(n.title, "Disconnected");
-        let eth = Some(NetLink { kind: LinkKind::Ethernet, name: "Ethernet 3".into(), signal: None, speed_bps: 1_000_000_000 });
+        let eth = Some(NetLink { kind: LinkKind::Ethernet, name: "Ethernet 3".into(), signal: None });
         let n = network_notice(&wifi("Home"), &eth).unwrap();
         assert_eq!((n.title.as_str(), n.detail.as_str()), ("Switched network", "Ethernet"));
         assert!(network_notice(&wifi("Home"), &wifi("Home")).is_none());

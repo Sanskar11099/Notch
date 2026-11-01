@@ -34,7 +34,7 @@ Notch is a **Windows application**: it uses Windows' own media controls, power a
 | **Agent list** | Hover the notch and the agents page lists **every agent that is working** (for example one in VS Code, one in Orca, one in Chrome) with how long each has been running. An agent that is **waiting for your review gets a green dot** and says *needs review*; the rest keep their orange dot. |
 | **Browser AI** | A small Chrome extension reports when **ChatGPT**, **Claude.ai** and **Gemini** start and finish answering, so a background tab can ping you too. |
 | **Music** | Now playing from any Windows media app: artwork, animated equalizer, transport controls, a progress bar you can seek, and a volume slider with mute. |
-| **System pages** | A widget page first (temperature, the connection with Wi-Fi signal and speed, and the battery level of every connected Bluetooth device), then the system info page: battery (turns green while charging), CPU, GPU, memory, disk and network speed. |
+| **System pages** | A widget page first (temperature, the connection with its Wi-Fi signal, and the battery level of every connected Bluetooth device), then the system info page: battery (turns green while charging), CPU, GPU, memory, disk and network speed. |
 | **Clipboard** | Everything you copy is kept on its own page until you shut down or restart: **search it, filter by date, click to paste anywhere**, and **drag items out or drop files, text and images in**. |
 | **Glance strip** | Touch the top edge when nothing is going on: time, battery and connection at a glance, plus **the weather** where you are. |
 | **System popups** | Charger plugged or unplugged, low and critical battery, fully charged, Bluetooth device connected (with its battery), network connected, dropped or switched, and a **volume and brightness HUD**. |
@@ -67,7 +67,7 @@ It stays out of the way: with nothing happening it is invisible, and it never ta
 - Expanded view has previous / play-pause / next, a **progress bar you can click to seek**, and a **volume slider with mute** (the system volume, same as the keyboard keys).
 
 ### System information
-- **Widget page (first):** tiles for the temperature, the active connection (Wi-Fi name, signal and speed, or Ethernet) and the battery level of every connected Bluetooth device.
+- **Widget page (first):** tiles for the temperature, the active connection (Wi-Fi name and signal, or Ethernet) and the battery level of every connected Bluetooth device.
 - **System info page (second):** battery (the icon turns green while the charger is connected), CPU, GPU load, memory, disk and network speed.
 - Pages stack vertically: scroll with the mouse wheel or click the dots. Values only refresh while you are looking at them.
 
@@ -200,7 +200,7 @@ src/
   server.rs      local event endpoint and the CLI client
   media.rs       Windows media session (music) and seeking
   sysinfo.rs     CPU / memory / disk / GPU / temperature / battery
-  netlink.rs     active connection, Wi-Fi signal and speed
+  netlink.rs     active connection and Wi-Fi signal
   devices.rs     Bluetooth devices and their battery levels
   notice.rs      what each system popup says (pure, unit tested)
   watchers.rs    network and volume change notifications

@@ -999,9 +999,9 @@ unsafe fn draw_devices(app: &App, x: f32, s: f32, a: f32) {
         text_in(app, fill_brush(app, fill), &app.big, &number, &rect(l + 14.0 * s, top + 44.0 * s, l + (TEMP_TILE_W - 6.0) * s, top + 84.0 * s), a);
         text(app, &app.small, "Temperature", &rect(l + 14.0 * s, top + 88.0 * s, l + (TEMP_TILE_W - 4.0) * s, top + 108.0 * s), a * 0.6);
 
-        // Connection tile: icon + type, signal bars (Wi-Fi), network name, speed. A weak signal tints the icon.
+        // Connection tile: icon + type, signal bars (Wi-Fi), network name. A weak signal tints the icon.
         let l = tile(NET_TILE_W);
-        let (glyph, kind, name, speed, signal) = match &st.link {
+        let (glyph, kind, name, signal) = match &st.link {
             Some(link) => {
                 let (glyph, kind) = match link.kind {
                     LinkKind::WiFi => ("\u{E701}", "Wi-Fi"),
@@ -1009,9 +1009,9 @@ unsafe fn draw_devices(app: &App, x: f32, s: f32, a: f32) {
                     LinkKind::Mobile => ("", "Mobile"),
                     LinkKind::Other => ("", "Network"),
                 };
-                (glyph, kind, link.name.clone(), netlink::format_speed_bps(link.speed_bps), link.signal)
+                (glyph, kind, link.name.clone(), link.signal)
             }
-            None => ("", "Offline", String::new(), "\u{2014}".to_string(), None),
+            None => ("", "Offline", String::new(), None),
         };
         let weak = signal.is_some_and(|q| q < WEAK_SIGNAL_PCT);
         let icon_brush = if weak { &app.accent } else { &app.white };
@@ -1020,8 +1020,8 @@ unsafe fn draw_devices(app: &App, x: f32, s: f32, a: f32) {
         if let Some(q) = signal {
             draw_signal_bars(app, l + (NET_TILE_W - 12.0) * s, top + 30.0 * s, s, a, q);
         }
-        text(app, &app.label, &name, &rect(l + 14.0 * s, top + 42.0 * s, l + (NET_TILE_W - 8.0) * s, top + 78.0 * s), a);
-        text(app, &app.text, &speed, &rect(l + 14.0 * s, top + 84.0 * s, l + (NET_TILE_W - 6.0) * s, top + 108.0 * s), a);
+        // The name gets the rest of the tile (long network names wrap onto a second line).
+        text(app, &app.text, &name, &rect(l + 14.0 * s, top + 44.0 * s, l + (NET_TILE_W - 8.0) * s, top + 106.0 * s), a);
 
         // Bluetooth tile: header, then a battery ring per connected device (percentage inside, name below).
         let l = tile(BT_TILE_W);

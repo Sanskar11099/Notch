@@ -36,7 +36,6 @@ pub struct NetLink {
     pub kind: LinkKind,
     pub name: String,        // Wi-Fi network name, or the adapter's name
     pub signal: Option<u8>,  // Wi-Fi signal quality 0-100
-    pub speed_bps: u64,
 }
 
 pub fn classify(if_type: u32) -> LinkKind {
@@ -45,19 +44,6 @@ pub fn classify(if_type: u32) -> LinkKind {
         IF_TYPE_WIFI => LinkKind::WiFi,
         t if IF_TYPE_WWAN.contains(&t) => LinkKind::Mobile,
         _ => LinkKind::Other,
-    }
-}
-
-/// "866 Mbps", "1 Gbps", "2.5 Gbps"; a dash when Windows reports no speed.
-pub fn format_speed_bps(bps: u64) -> String {
-    match bps {
-        0 => "\u{2014}".to_string(),
-        b if b >= 1_000_000_000 => {
-            let g = b as f64 / 1e9;
-            if (g - g.round()).abs() < 0.05 { format!("{} Gbps", g.round() as u64) } else { format!("{g:.1} Gbps") }
-        }
-        b if b >= 1_000_000 => format!("{} Mbps", (b as f64 / 1e6).round() as u64),
-        b => format!("{} Kbps", (b as f64 / 1e3).round() as u64),
     }
 }
 
@@ -75,8 +61,8 @@ fn is_usable_nic(row: &MIB_IF_ROW2) -> bool {
     row.OperStatus.0 == OPER_STATUS_UP && row.InterfaceAndOperStatusFlags._bitfield & HARDWARE_INTERFACE_BIT != 0
 }
 
-/// (network name, signal quality, receive rate in bits/s) of the connected Wi-Fi interface.
-fn wifi_details() -> Option<(String, u8, u64)> {
+/// (network name, signal quality) of the connected Wi-Fi interface.
+fn wifi_details() -> Option<(String, u8)> {
     unsafe {
         let (mut negotiated, mut handle) = (0u32, HANDLE::default());
         if WlanOpenHandle(WLAN_CLIENT_VERSION, None, &mut negotiated, &mut handle) != 0 {
@@ -94,7 +80,7 @@ fn wifi_details() -> Option<(String, u8, u64)> {
                 if rc == 0 && !data.is_null() {
                     let assoc = &(*(data as *const WLAN_CONNECTION_ATTRIBUTES)).wlanAssociationAttributes;
                     let ssid = ssid_from(assoc.dot11Ssid.uSSIDLength, &assoc.dot11Ssid.ucSSID);
-                    found = Some((ssid, assoc.wlanSignalQuality.min(100) as u8, assoc.ulRxRate as u64 * 1000));
+                    found = Some((ssid, assoc.wlanSignalQuality.min(100) as u8));
                     WlanFreeMemory(data);
                     break;
                 }
@@ -127,17 +113,15 @@ pub fn active() -> Option<NetLink> {
             kind: classify(r.Type),
             name: alias_of(r),
             signal: None,
-            speed_bps: r.ReceiveLinkSpeed,
         });
         FreeMibTable(table as *const c_void);
         link
     }?;
     Some(match link.kind {
         LinkKind::WiFi => match wifi_details() {
-            Some((ssid, signal, rate)) => NetLink {
+            Some((ssid, signal)) => NetLink {
                 name: if ssid.is_empty() { link.name } else { ssid },
                 signal: Some(signal),
-                speed_bps: if rate > 0 { rate } else { link.speed_bps },
                 ..link
             },
             None => link,
@@ -161,16 +145,6 @@ mod tests {
     }
 
     #[test]
-    fn formats_link_speeds() {
-        assert_eq!(format_speed_bps(0), "\u{2014}");
-        assert_eq!(format_speed_bps(866_700_000), "867 Mbps");
-        assert_eq!(format_speed_bps(100_000_000), "100 Mbps");
-        assert_eq!(format_speed_bps(1_000_000_000), "1 Gbps");
-        assert_eq!(format_speed_bps(2_500_000_000), "2.5 Gbps");
-        assert_eq!(format_speed_bps(64_000), "64 Kbps");
-    }
-
-    #[test]
     fn decodes_ssids_from_fixed_buffers() {
         let mut buf = [0u8; 32];
         buf[..7].copy_from_slice(b"Home-5G");
@@ -183,7 +157,6 @@ mod tests {
     fn live_link_is_sane() {
         if let Some(l) = active() {
             assert!(l.signal.is_none_or(|s| s <= 100));
-            assert!(!format_speed_bps(l.speed_bps).is_empty());
         }
     }
 
