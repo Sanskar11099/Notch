@@ -4,7 +4,10 @@
 
 mod art;
 mod autostart;
+mod clipboard;
+mod clippage;
 mod devices;
+mod dnd;
 mod media;
 mod netlink;
 mod notice;
@@ -32,16 +35,17 @@ use windows::{
                 DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL,
                 DWRITE_FONT_WEIGHT, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_WEIGHT_SEMI_BOLD,
                 DWRITE_MEASURING_MODE_NATURAL, DWRITE_PARAGRAPH_ALIGNMENT_CENTER,
-                DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_TEXT_ALIGNMENT_TRAILING, DWriteCreateFactory, IDWriteFactory,
-                IDWriteTextFormat,
+                DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_TEXT_ALIGNMENT_TRAILING, DWRITE_WORD_WRAPPING_NO_WRAP, DWriteCreateFactory,
+                IDWriteFactory, IDWriteTextFormat,
             },
             Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM,
             Gdi::*,
         },
         Media::Audio::{PlaySoundW, SND_ALIAS, SND_ASYNC},
         System::{
-            Com::{COINIT_APARTMENTTHREADED, CoInitializeEx},
+            DataExchange::AddClipboardFormatListener,
             LibraryLoader::GetModuleHandleW,
+            Ole::OleInitialize,
             Power::{POWERBROADCAST_SETTING, RegisterPowerSettingNotification},
             Threading::{GetCurrentProcess, SetProcessWorkingSetSize},
         },
@@ -91,6 +95,8 @@ const SYS_TIMER_ID: usize = 4;
 const SYS_FIRST_MS: u32 = 300; // first CPU reading needs a second sample, so take it soon after opening
 const SYS_MS: u32 = 1000;
 const DEVICES_MS: u32 = 3000; // temperature and Bluetooth batteries change slowly: no need to read them every second
+const ROTATE_TIMER_ID: usize = 10; // collapsed pill: step to the next running agent
+const ROTATE_MS: u32 = 3000;
 const WEATHER_TIMER_ID: usize = 7; // refresh the weather: every 30 min, every 2 min until the first success
 const WEATHER_MS: u32 = 30 * 60 * 1000;
 const WEATHER_RETRY_MS: u32 = 2 * 60 * 1000; // no network yet at login, or location off: try again soon
@@ -125,13 +131,12 @@ const HOT_STRIP_H: f32 = 6.0;
 const HOT_STRIP_ALPHA: f32 = 0.008; // ~2/255: enough for Windows to route the mouse to us, too faint to see
 const ROW_H: f32 = 19.0; // system page row height (logical px): six rows must fit in the 140 px pill
 const ROW_TOP: f32 = 12.0;
-// 0 = music, 1 = system, 2 = devices (temperature, connection, Bluetooth), 3 = agents (live preview of running work)
-const PAGES: u8 = 4;
+// 0 = music, 1 = widgets, 2 = system, 3 = agents (live preview of running work), 4 = clipboard history
+const PAGES: u8 = 5;
 const AGENTS_PAGE: u8 = 3;
-const FEED_LINES: usize = 5; // steps shown in the agents page's live feed (also how many are remembered)
-const FEED_LINE_H: f32 = 17.0;
+const CLIP_PAGE: u8 = 4;
 const DOT_RIGHT: f32 = 12.0; // page dots: distance from the pill's right edge, first dot's y, spacing
-const DOT_TOP: f32 = 46.0; // four dots centred on the 140 px pill: 46, 62, 78, 94
+const DOT_TOP: f32 = 38.0; // five dots centred on the 140 px pill: 38, 54, 70, 86, 102
 const DOT_GAP: f32 = 16.0;
 const EQ_MS: u32 = 167; // ~6 fps: still reads as motion; measured only ~16% cheaper than 10 fps (most cost is fixed per tick)
 // Equalizer bars: height swings between MIN and MAX logical px; each bar has its own speed (Hz) and phase.
@@ -144,7 +149,8 @@ const TEXT_FADE_START: f32 = 0.6; // text appears once the pill is 60% open
 const MAX_SOURCES: usize = 64;
 const ID_QUIT: usize = 1;
 const ID_AUTOSTART: usize = 2;
-// An agent that never reports done/attention (crashed, killed) stops counting as working after this.
+// An agent that goes quiet without reporting done/attention (crashed, killed) stops counting as working this long
+// after its last sign of life.
 const WORKING_TTL: Duration = Duration::from_secs(30 * 60);
 // Glass: a dark blue-grey tint the desktop faintly shows through (alpha), a white sheen fading from the
 // top, and a pale hairline edge. Raise GLASS_TINT.a for legibility over bright windows, lower it for more glass.
@@ -159,18 +165,8 @@ struct Working {
     label: String, // agent, project and app for this run, e.g. "claude · my-app · VS Code" (agents page)
     short: String, // what the narrow collapsed pill shows, e.g. "claude · VS Code"
     since: Instant,
-    task: String,         // the prompt that started this run (hover preview)
-    recent: Vec<String>,  // its latest steps, oldest first; the last one is what it is doing right now
     last_activity: Instant, // when the newest step arrived (picks which run the agents page follows)
-    steps: u32,           // tool calls seen so far
-}
-
-/// Keep only the newest `cap` steps.
-fn push_recent(recent: &mut Vec<String>, step: String, cap: usize) {
-    recent.push(step);
-    if recent.len() > cap {
-        recent.remove(0);
-    }
+    waiting: bool,        // finished its turn and needs the user's review/input (its dot turns green)
 }
 
 struct App {
@@ -193,7 +189,10 @@ struct App {
     tiny: IDWriteTextFormat,      // device names under the rings
     label: IDWriteTextFormat, // system page: row names (left, vertically centred)
     value: IDWriteTextFormat, // system page: row values (right-aligned)
-    page: u8,                 // expanded view: 0 = music, 1 = widgets, 2 = system info, 3 = agents (popups override all)
+    row: IDWriteTextFormat,   // clipboard page: one-line list text (no wrapping, so long copies are clipped, not stacked)
+    stamp: IDWriteTextFormat, // clipboard page: when it was copied (small, right-aligned)
+    clip: clipboard::View,    // clipboard history and what the user is doing with it
+    page: u8,                 // expanded view: 0 = music, 1 = widgets, 2 = system info, 3 = agents, 4 = clipboard (popups override all)
     page_spring: Spring,      // animated scroll position between pages (settles on `page`)
     stats: Stats,
     sampler: Sampler,
@@ -226,6 +225,8 @@ struct App {
     compact_target: f32,
     reveal: Spring, // 0 = hidden above the screen edge, 1 = slid into view
     reveal_target: f32,
+    rotate: usize,        // which running agent the collapsed pill names (counts up; taken modulo how many are running)
+    rotate_running: bool, // ROTATE_TIMER_ID is set
     eq_running: bool, // EQ_TIMER_ID is set; tracked so we only (re)arm it on a real state change
     eq_start: Instant,
     tracking: bool,
@@ -477,78 +478,96 @@ unsafe fn draw_glass(app: &App, pill: &D2D1_ROUNDED_RECT, s: f32, h: f32) {
 
 /// Agent runs currently working, oldest first (a stable order, so the preview doesn't reshuffle every frame).
 fn live_runs(app: &App) -> Vec<&Working> {
-    let mut runs: Vec<&Working> = app.working.values().filter(|w| w.since.elapsed() < WORKING_TTL).collect();
+    let mut runs: Vec<&Working> = app.working.values().filter(|w| w.last_activity.elapsed() < WORKING_TTL).collect();
     runs.sort_by_key(|w| w.since);
     runs
 }
 
-// Live view of what the agent is doing. It follows the run that stepped most recently: header (name, elapsed
-// time, step count), the task you gave it, then a feed of its latest steps with the current one lit. The feed
-// scrolls as new steps arrive; a 1 s tick keeps the elapsed time moving while this page is open.
+// Every agent that is working, one row each: "claude · Project Notch · VS Code" with how long it has been going.
+// A 1 s tick keeps the elapsed times moving while this page is open.
+const AGENT_ROWS: usize = 5;
+const AGENT_ROW_H: f32 = 22.0;
+
 unsafe fn draw_agents(app: &App, x: f32, w: f32, s: f32, a: f32) {
     unsafe {
         let runs = live_runs(app);
-        let Some(run) = runs.iter().copied().max_by_key(|r| r.last_activity) else {
+        if runs.is_empty() {
             text(app, &app.text, "No agents working", &rect(x + 24.0 * s, 18.0 * s, x + w - 30.0 * s, 50.0 * s), a * 0.6);
             return;
-        };
-        let dot = D2D1_ELLIPSE { point: Vector2 { X: x + 30.0 * s, Y: 16.0 * s }, radiusX: 3.5 * s, radiusY: 3.5 * s };
-        app.accent.SetOpacity(a);
-        app.rt.FillEllipse(&dot, &app.accent);
-        let label = match runs.len() - 1 {
-            0 => run.label.clone(),
-            others => format!("{}  +{others} more", run.label),
-        };
-        text(app, &app.label, &label, &rect(x + 42.0 * s, 8.0 * s, x + w - 170.0 * s, 24.0 * s), a);
-        let steps = if run.steps == 1 { "1 step".to_string() } else { format!("{} steps", run.steps) };
-        let meta = format!("{} \u{b7} {steps}", sysinfo::format_elapsed(run.since.elapsed().as_secs()));
-        text(app, &app.value, &meta, &rect(x + w - 170.0 * s, 8.0 * s, x + w - 30.0 * s, 24.0 * s), a * 0.7);
-        let task = if run.task.is_empty() { "Working\u{2026}" } else { run.task.as_str() };
-        text(app, &app.small, task, &rect(x + 42.0 * s, 26.0 * s, x + w - 30.0 * s, 42.0 * s), a * 0.9);
-
-        if run.recent.is_empty() {
-            text(app, &app.small, "Starting\u{2026}", &rect(x + 48.0 * s, 46.0 * s, x + w - 30.0 * s, 63.0 * s), a * 0.55);
-            return;
         }
-        let shown = &run.recent[run.recent.len().saturating_sub(FEED_LINES)..];
-        for (i, step) in shown.iter().enumerate() {
-            let top = (46.0 + FEED_LINE_H * i as f32) * s;
-            let bottom = top + FEED_LINE_H * s;
-            if i + 1 == shown.len() {
-                // The step it is on right now: lit.
-                let now = D2D1_ELLIPSE { point: Vector2 { X: x + 36.0 * s, Y: top + 8.5 * s }, radiusX: 3.0 * s, radiusY: 3.0 * s };
-                app.accent.SetOpacity(a);
-                app.rt.FillEllipse(&now, &app.accent);
-                text(app, &app.small, step, &rect(x + 48.0 * s, top, x + w - 30.0 * s, bottom), a);
+        // The last row turns into "+N more" when there are too many to list.
+        let listed = if runs.len() > AGENT_ROWS { AGENT_ROWS - 1 } else { runs.len() };
+        for (i, run) in runs.iter().take(listed).enumerate() {
+            let top = (ROW_TOP + AGENT_ROW_H * i as f32) * s;
+            let bottom = top + AGENT_ROW_H * s;
+            let dot = D2D1_ELLIPSE { point: Vector2 { X: x + 30.0 * s, Y: (top + bottom) / 2.0 }, radiusX: 3.5 * s, radiusY: 3.5 * s };
+            let dot_brush = if run.waiting { &app.good } else { &app.accent };
+            dot_brush.SetOpacity(a);
+            app.rt.FillEllipse(&dot, dot_brush);
+            text(app, &app.row, &run.label, &rect(x + 42.0 * s, top, x + w - 110.0 * s, bottom), a);
+            let area = rect(x + w - 108.0 * s, top, x + w - 34.0 * s, bottom);
+            if run.waiting {
+                text_in(app, &app.good, &app.stamp, "needs review", &area, a);
             } else {
-                text(app, &app.small, "\u{2713}", &rect(x + 31.0 * s, top, x + 45.0 * s, bottom), a * 0.4);
-                text(app, &app.small, step, &rect(x + 48.0 * s, top, x + w - 30.0 * s, bottom), a * 0.55);
+                text(app, &app.stamp, &sysinfo::format_elapsed(run.since.elapsed().as_secs()), &area, a * 0.6);
             }
+        }
+        if runs.len() > listed {
+            let top = (ROW_TOP + AGENT_ROW_H * listed as f32) * s;
+            text(app, &app.row, &format!("+{} more", runs.len() - listed), &rect(x + 42.0 * s, top, x + w - 110.0 * s, top + AGENT_ROW_H * s), a * 0.6);
         }
     }
 }
 
+/// The agent the collapsed pill names right now. With several running it steps through them (see update_rotate_timer).
+fn shown_run(app: &App) -> Option<&Working> {
+    let runs = live_runs(app);
+    (!runs.is_empty()).then(|| runs[app.rotate % runs.len()])
+}
+
 fn working_label(app: &App) -> Option<String> {
-    let mut live = app.working.values().filter(|w| w.since.elapsed() < WORKING_TTL).map(|w| &w.short);
-    let first = live.next()?;
-    Some(match live.count() {
-        0 => first.clone(),
-        n => format!("{} working", n + 1),
-    })
+    shown_run(app).map(|r| r.short.clone())
+}
+
+/// Step the collapsed pill's label through the running agents while there is more than one to show.
+fn update_rotate_timer(hwnd: HWND, app: &mut App) {
+    let want = app.target == 0.0 && app.reveal_target > 0.0 && live_runs(app).len() > 1;
+    if want == app.rotate_running {
+        return;
+    }
+    app.rotate_running = want;
+    unsafe {
+        if want {
+            SetTimer(Some(hwnd), ROTATE_TIMER_ID, ROTATE_MS, None);
+        } else {
+            let _ = KillTimer(Some(hwnd), ROTATE_TIMER_ID);
+        }
+    }
+}
+
+fn on_rotate_tick(hwnd: HWND) {
+    APP.with(|a| {
+        if let Some(app) = a.borrow_mut().as_mut() {
+            app.rotate = app.rotate.wrapping_add(1);
+            update_rotate_timer(hwnd, app); // an agent may have timed out: stop if only one is left
+            let _ = render(hwnd, app);
+        }
+    });
 }
 
 // Static dot + name in the collapsed pill. Fades out as the pill opens. No animation, so no timer.
 unsafe fn draw_working(app: &App, x: f32, w: f32, h: f32, s: f32, t: f32) -> Result<()> {
     unsafe {
         let alpha = (1.0 - t / 0.4).clamp(0.0, 1.0);
-        let Some(label) = working_label(app).filter(|_| alpha > 0.0) else { return Ok(()) };
-        app.accent.SetOpacity(alpha);
+        let Some(run) = shown_run(app).filter(|_| alpha > 0.0) else { return Ok(()) };
+        let dot_brush = if run.waiting { &app.good } else { &app.accent }; // green: waiting for the user's review
+        dot_brush.SetOpacity(alpha);
         let dot = D2D1_ELLIPSE { point: Vector2 { X: x + 16.0 * s, Y: h / 2.0 }, radiusX: 4.0 * s, radiusY: 4.0 * s };
-        app.rt.FillEllipse(&dot, &app.accent);
+        app.rt.FillEllipse(&dot, dot_brush);
         // Leave room on the right for the equalizer bars and the microphone/camera icons.
         let privacy_icons = app.privacy.mic as u8 + app.privacy.camera as u8;
         let right_pad = if is_playing(app) { 38.0 } else { 10.0 } + 22.0 * privacy_icons as f32;
-        text(app, &app.badge, &label, &rect(x + 28.0 * s, 0.0, x + w - right_pad * s, h), alpha * 0.9);
+        text(app, &app.badge, &run.short, &rect(x + 28.0 * s, 0.0, x + w - right_pad * s, h), alpha * 0.9);
         Ok(())
     }
 }
@@ -664,7 +683,8 @@ fn sample_page(app: &mut App) {
 // two stats pages changes `sys_page`, which restarts sampling for the new page.
 fn update_sys_timer(hwnd: HWND, app: &mut App) {
     // Pages 1+ sample live stats; the music page (0) re-reads the volume so the slider follows the keyboard keys.
-    let wants_ticks = app.page >= 1 || app.media.is_some();
+    // The clipboard page has nothing live to sample: it redraws when something happens.
+    let wants_ticks = app.page != CLIP_PAGE && (app.page >= 1 || app.media.is_some());
     let want = if app.target == 1.0 && wants_ticks && !app.show_event {
         Some(app.page)
     } else if glance_wanted(app) {
@@ -1112,7 +1132,8 @@ unsafe fn draw_content(app: &App, x: f32, w: f32, h: f32, s: f32, a: f32, lift: 
                 0 => result = draw_music(app, x, w, s, a),
                 1 => draw_devices(app, x, s, a), // the widget page comes first...
                 2 => draw_system(app, x, w, s, a), // ...then the system info page
-                _ => draw_agents(app, x, w, s, a),
+                3 => draw_agents(app, x, w, s, a),
+                _ => clippage::draw(app, x, w, s, a),
             }
         }
         app.rt.SetTransform(&Matrix3x2 { M11: 1.0, M12: 0.0, M21: 0.0, M22: 1.0, M31: 0.0, M32: lift });
@@ -1265,22 +1286,18 @@ fn on_event(hwnd: HWND, ev: Event) {
             if let Some(app) = a.borrow_mut().as_mut() {
                 let key = ev.key();
                 let is_new = !app.working.contains_key(&key); // notch started mid-run: begin tracking it
+                let was_waiting = app.working.get(&key).is_some_and(|r| r.waiting);
                 let run = app.working.entry(key).or_insert_with(|| Working {
                     label: run_label(&ev),
                     short: short_label(&ev),
                     since: Instant::now(),
-                    task: String::new(),
-                    recent: Vec::new(),
                     last_activity: Instant::now(),
-                    steps: 0,
+                    waiting: false,
                 });
-                if !ev.detail.is_empty() {
-                    push_recent(&mut run.recent, ev.detail.clone(), FEED_LINES);
-                }
                 run.last_activity = Instant::now();
-                run.steps += 1;
+                run.waiting = false; // it is working again
                 update_reveal(hwnd, app); // a run we only just learned about makes the notch visible
-                if is_new || app.target == 1.0 {
+                if is_new || was_waiting || app.target == 1.0 {
                     let _ = render(hwnd, app); // only worth a frame if the pill is open or its label changed
                 }
             }
@@ -1293,7 +1310,20 @@ fn on_event(hwnd: HWND, ev: Event) {
         let Some(app) = a.as_mut() else { return };
         let key = ev.key();
         if opens {
-            app.working.remove(&key);
+            if ev.status == Status::Attention {
+                // Waiting for the user: stays in the list with a green dot until it works again or is cleared.
+                let run = app.working.entry(key.clone()).or_insert_with(|| Working {
+                    label: run_label(&ev),
+                    short: short_label(&ev),
+                    since: Instant::now(),
+                    last_activity: Instant::now(),
+                    waiting: false,
+                });
+                run.waiting = true;
+                run.last_activity = Instant::now();
+            } else {
+                app.working.remove(&key);
+            }
             // Prefer the window captured when this run started working: the foreground window
             // at completion time is often something else by then.
             app.focus = app.sources.get(&key).copied().unwrap_or(ev.hwnd);
@@ -1304,10 +1334,8 @@ fn on_event(hwnd: HWND, ev: Event) {
                     label: run_label(&ev),
                     short: short_label(&ev),
                     since: Instant::now(),
-                    task: ev.detail.clone(),
-                    recent: Vec::new(),
                     last_activity: Instant::now(),
-                    steps: 0,
+                    waiting: false,
                 },
             );
             if ev.hwnd != 0 {
@@ -1497,6 +1525,7 @@ fn update_reveal(hwnd: HWND, app: &mut App) -> bool {
         changed = true;
     }
     update_sys_timer(hwnd, app);
+    update_rotate_timer(hwnd, app);
     if changed {
         app.last_tick = Instant::now();
         unsafe { SetTimer(Some(hwnd), TIMER_ID, FRAME_MS, None) };
@@ -1540,6 +1569,12 @@ fn on_timer(hwnd: HWND) {
             if app.target == 0.0 {
                 app.show_event = false; // fully collapsed: the next hover shows music again
                 app.notice = None;
+                app.clip.reset_view(); // the next visit starts with an empty search and no date filter
+                if app.clip.typing {
+                    // A popup closed the notch while the search box had focus: leave it like Esc would (handled
+                    // after this borrow ends, because handing focus back sends messages to this window).
+                    unsafe { let _ = PostMessageW(Some(hwnd), WM_CHAR, WPARAM(0x1B), LPARAM(0)); }
+                }
             }
             if update_reveal(hwnd, app) {
                 // Collapse finished with nothing left to show: start sliding away, so keep ticking.
@@ -1555,9 +1590,19 @@ fn on_timer(hwnd: HWND) {
     });
 }
 
-fn show_menu(hwnd: HWND) {
+/// The right-click menu. On the clipboard page it also offers to delete the item under the cursor or clear the history.
+fn show_menu(hwnd: HWND, clip_item: Option<u64>, can_clear: bool) {
     unsafe {
         let Ok(menu) = CreatePopupMenu() else { return };
+        if clip_item.is_some() {
+            let _ = AppendMenuW(menu, MF_STRING, clippage::ID_CLIP_DELETE, w!("Delete this item"));
+        }
+        if can_clear {
+            let _ = AppendMenuW(menu, MF_STRING, clippage::ID_CLIP_CLEAR, w!("Clear clipboard history"));
+        }
+        if clip_item.is_some() || can_clear {
+            let _ = AppendMenuW(menu, MF_SEPARATOR, 0, None);
+        }
         let login_flags = if autostart::is_enabled() { MF_STRING | MF_CHECKED } else { MF_STRING };
         let _ = AppendMenuW(menu, login_flags, ID_AUTOSTART, w!("Start at login"));
         let _ = AppendMenuW(menu, MF_STRING, ID_QUIT, w!("Quit"));
@@ -1570,6 +1615,12 @@ fn show_menu(hwnd: HWND) {
         match picked.0 as usize {
             ID_QUIT => { let _ = DestroyWindow(hwnd); }
             ID_AUTOSTART => autostart::toggle(),
+            clippage::ID_CLIP_DELETE => {
+                if let Some(id) = clip_item {
+                    clippage::delete(hwnd, id);
+                }
+            }
+            clippage::ID_CLIP_CLEAR => clippage::clear(hwnd),
             _ => {}
         }
     }
@@ -1592,6 +1643,10 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
                 _ => false,
             });
             if dragging {
+                return LRESULT(0);
+            }
+            // Clipboard page: row hover, and pulling a row off the notch starts a drag.
+            if clippage::on_mouse_move(hwnd, lp, wp.0 & 1 != 0) {
                 return LRESULT(0);
             }
             let (first, expand) = APP.with(|a| {
@@ -1625,12 +1680,20 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
             LRESULT(0)
         }
         WM_MOUSELEAVE => {
-            APP.with(|a| a.borrow_mut().as_mut().map(|app| app.tracking = false));
-            set_target(hwnd, 0.0);
+            let typing = APP.with(|a| {
+                a.borrow_mut().as_mut().is_some_and(|app| {
+                    app.tracking = false;
+                    app.clip.typing // typing in the search box keeps the notch open until it loses focus
+                })
+            });
+            if !typing {
+                set_target(hwnd, 0.0);
+            }
             LRESULT(0)
         }
         WM_LBUTTONDOWN => {
             let (x, y) = ((lp.0 & 0xFFFF) as i16 as i32, ((lp.0 >> 16) & 0xFFFF) as i16 as i32);
+            clippage::on_button_down(x, y);
             let grabbed = APP.with(|a| {
                 let mut a = a.borrow_mut();
                 let Some(app) = a.as_mut() else { return false };
@@ -1654,35 +1717,38 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
                 unsafe { let _ = ReleaseCapture(); }
                 return LRESULT(0);
             }
-            let muted_click = APP.with(|a| {
-                let mut a = a.borrow_mut();
-                let Some(app) = a.as_mut() else { return false };
-                if !hit_mute(app, x, y) {
-                    return false;
-                }
-                if volume::toggle_mute().is_some() {
-                    app.volume = volume::read();
-                    let _ = render(hwnd, app);
-                }
-                true
-            });
-            if muted_click {
+            if clippage::on_click(hwnd, x, y) {
+                return LRESULT(0);
+            }
+            // The OS calls below (volume, media session) run with no APP borrow held: an outgoing COM call can pump
+            // messages, and an incoming drag-and-drop callback would then try to borrow it again.
+            if APP.with(|a| a.borrow().as_ref().is_some_and(|app| hit_mute(app, x, y))) {
+                let toggled = volume::toggle_mute().is_some();
+                APP.with(|a| {
+                    if let (true, Some(app)) = (toggled, a.borrow_mut().as_mut()) {
+                        app.volume = volume::read();
+                        let _ = render(hwnd, app);
+                    }
+                });
                 return LRESULT(0);
             }
             // Click on the progress bar: jump there (and show it at once rather than waiting for the next read).
-            let sought = APP.with(|a| {
-                let mut a = a.borrow_mut();
-                let Some(app) = a.as_mut() else { return false };
-                let (Some(frac), Some(tl)) = (hit_progress(app, x, y), app.timeline) else { return false };
-                let target = (tl.duration_ms as f32 * frac) as u64;
-                media::seek(target);
-                app.timeline = Some(media::Timeline { position_ms: target, ..tl });
-                app.timeline_at = Instant::now();
-                app.seek_hold = Instant::now() + SEEK_HOLD;
-                let _ = render(hwnd, app);
-                true
+            let seek = APP.with(|a| {
+                let a = a.borrow();
+                let app = a.as_ref()?;
+                let (frac, tl) = (hit_progress(app, x, y)?, app.timeline?);
+                Some((tl, (tl.duration_ms as f32 * frac) as u64))
             });
-            if sought {
+            if let Some((tl, target)) = seek {
+                media::seek(target);
+                APP.with(|a| {
+                    if let Some(app) = a.borrow_mut().as_mut() {
+                        app.timeline = Some(media::Timeline { position_ms: target, ..tl });
+                        app.timeline_at = Instant::now();
+                        app.seek_hold = Instant::now() + SEEK_HOLD;
+                        let _ = render(hwnd, app);
+                    }
+                });
                 return LRESULT(0);
             }
             if let Some(page) = APP.with(|a| a.borrow().as_ref().and_then(|app| hit_dots(app, x, y))) {
@@ -1762,18 +1828,40 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
             let delta = ((wp.0 >> 16) & 0xFFFF) as u16 as i16;
             let current = APP.with(|a| a.borrow().as_ref().filter(|app| app.spring.pos > 0.9).map(|app| app.page));
             if let Some(page) = current {
+                // On the clipboard page the wheel scrolls the list first, and only changes page at the ends.
+                if page == CLIP_PAGE && clippage::on_wheel(hwnd, delta < 0) {
+                    return LRESULT(0);
+                }
                 set_page(hwnd, if delta < 0 { (page + 1).min(PAGES - 1) } else { page.saturating_sub(1) });
             }
             LRESULT(0)
         }
         WM_RBUTTONUP => {
-            show_menu(hwnd);
+            let (x, y) = ((lp.0 & 0xFFFF) as i16 as i32, ((lp.0 >> 16) & 0xFFFF) as i16 as i32);
+            let (item, can_clear) = clippage::menu_context(x, y);
+            show_menu(hwnd, item, can_clear);
+            LRESULT(0)
+        }
+        WM_CHAR => {
+            clippage::on_char(hwnd, wp.0 as u16);
+            LRESULT(0)
+        }
+        WM_SYSCOMMAND if (wp.0 & 0xFFF0) == SC_CLOSE as usize && clippage::is_typing() => LRESULT(0), // Alt+F4 in the search box must not quit the notch
+        WM_KILLFOCUS => {
+            clippage::on_kill_focus(hwnd);
+            LRESULT(0)
+        }
+        clippage::WM_CLIPBOARDUPDATE => {
+            clippage::on_clipboard_update(hwnd);
             LRESULT(0)
         }
         WM_TIMER => {
             match wp.0 {
+                clippage::CLIP_TIMER_ID => clippage::on_clip_timer(hwnd),
+                clippage::PASTE_TIMER_ID => clippage::on_paste_timer(hwnd),
                 HOLD_TIMER_ID => on_hold_expired(hwnd),
                 EQ_TIMER_ID => on_eq_tick(hwnd),
+                ROTATE_TIMER_ID => on_rotate_tick(hwnd),
                 SYS_TIMER_ID => on_sys_tick(hwnd),
                 BT_TIMER_ID => on_bt_timer(hwnd),
                 WEATHER_TIMER_ID => weather::refresh(hwnd),
@@ -1870,6 +1958,13 @@ fn create_app(hwnd: HWND) -> Result<App> {
         let value = format(w!("Segoe UI"), DWRITE_FONT_WEIGHT_SEMI_BOLD, 13.0)?;
         value.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER)?;
         value.SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING)?;
+        let row = format(w!("Segoe UI"), DWRITE_FONT_WEIGHT_NORMAL, 13.0)?;
+        row.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER)?;
+        row.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP)?;
+        let stamp = format(w!("Segoe UI"), DWRITE_FONT_WEIGHT_NORMAL, 11.0)?;
+        stamp.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER)?;
+        stamp.SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING)?;
+        stamp.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP)?;
         let big = format(w!("Segoe UI"), DWRITE_FONT_WEIGHT_SEMI_BOLD, 28.0)?;
         let icon_big = format(w!("Segoe MDL2 Assets"), DWRITE_FONT_WEIGHT_NORMAL, 34.0)?;
         icon_big.SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER)?;
@@ -1894,7 +1989,7 @@ fn create_app(hwnd: HWND) -> Result<App> {
 
         let app = App {
             rt, brush, white, text, small, icons, event: None, show_event: false, media: None, art: None,
-            label, value, page: 0, page_spring: Spring::default(), stats: Stats::default(), sampler: Sampler::default(), sys_page: None, volume: None, vol_drag: false,
+            label, value, row, stamp, clip: clipboard::View::default(), page: 0, page_spring: Spring::default(), stats: Stats::default(), sampler: Sampler::default(), sys_page: None, volume: None, vol_drag: false,
             privacy: privacy::Privacy::default(),
             notice: None,
             power_prev: {
@@ -1916,6 +2011,8 @@ fn create_app(hwnd: HWND) -> Result<App> {
             compact_target: 0.0,
             reveal: Spring::default(), // starts hidden: nothing to show yet
             reveal_target: 0.0,
+            rotate: 0,
+            rotate_running: false,
             eq_running: false,
             eq_start: Instant::now(),
             tracking: false,
@@ -1941,7 +2038,7 @@ fn main() -> Result<()> {
     unsafe {
         // Without this Windows bitmap-scales the window on high-DPI screens (blurry, wrong size).
         let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED); // WIC (album art) needs COM on this thread
+        let _ = OleInitialize(None); // COM for WIC (album art), plus OLE for the clipboard and drag and drop
         let hinst = GetModuleHandleW(None)?;
         let class = w!("NotchWindow");
         RegisterClassW(&WNDCLASSW {
@@ -1958,6 +2055,8 @@ fn main() -> Result<()> {
         )?;
         let app = create_app(hwnd)?;
         APP.with(|a| *a.borrow_mut() = Some(app));
+        dnd::register_drop_target(hwnd); // dropping files, text or images on the notch adds them to the clipboard page
+        let _ = AddClipboardFormatListener(hwnd); // WM_CLIPBOARDUPDATE whenever anything is copied
         server::spawn(listener, hwnd);
         media::spawn(hwnd);
         privacy::spawn(hwnd);
@@ -1975,22 +2074,4 @@ fn main() -> Result<()> {
         }
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::push_recent;
-
-    #[test]
-    fn feed_keeps_only_the_newest_steps_in_order() {
-        let mut feed = Vec::new();
-        for n in 1..=7 {
-            push_recent(&mut feed, format!("step {n}"), 5);
-        }
-        assert_eq!(feed, ["step 3", "step 4", "step 5", "step 6", "step 7"]);
-        push_recent(&mut feed, "step 8".into(), 5);
-        assert_eq!(feed.first().map(String::as_str), Some("step 4"));
-        assert_eq!(feed.last().map(String::as_str), Some("step 8"));
-        assert_eq!(feed.len(), 5);
-    }
 }

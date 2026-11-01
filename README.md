@@ -31,10 +31,11 @@ Notch is a **Windows application**: it uses Windows' own media controls, power a
 | | |
 |---|---|
 | **AI agents** | Live progress for **Claude Code**, **Codex**, **Copilot** and any CLI that can run a command. A "working" dot while a run is active, a **Done** or **Needs attention** popup with a chime when it ends, and click-to-focus the window it came from. Each popup says *which agent, which project, and in which app*: `claude · Project Notch · VS Code`. |
-| **Live step feed** | Hover the notch while an agent works and see its current step, the last few steps, elapsed time and step count. |
+| **Agent list** | Hover the notch and the agents page lists **every agent that is working** (for example one in VS Code, one in Orca, one in Chrome) with how long each has been running. An agent that is **waiting for your review gets a green dot** and says *needs review*; the rest keep their orange dot. |
 | **Browser AI** | A small Chrome extension reports when **ChatGPT**, **Claude.ai** and **Gemini** start and finish answering, so a background tab can ping you too. |
 | **Music** | Now playing from any Windows media app: artwork, animated equalizer, transport controls, a progress bar you can seek, and a volume slider with mute. |
 | **System pages** | A widget page first (temperature, the connection with Wi-Fi signal and speed, and the battery level of every connected Bluetooth device), then the system info page: battery (turns green while charging), CPU, GPU, memory, disk and network speed. |
+| **Clipboard** | Everything you copy is kept on its own page until you shut down or restart: **search it, filter by date, click to paste anywhere**, and **drag items out or drop files, text and images in**. |
 | **Glance strip** | Touch the top edge when nothing is going on: time, battery and connection at a glance, plus **the weather** where you are. |
 | **System popups** | Charger plugged or unplugged, low and critical battery, fully charged, Bluetooth device connected (with its battery), network connected, dropped or switched, and a **volume and brightness HUD**. |
 | **Privacy dot** | An orange microphone or green camera icon appears whenever any app is using them. |
@@ -43,8 +44,8 @@ Notch is a **Windows application**: it uses Windows' own media controls, power a
 
 ```
  hidden          ->   peek (hover the edge)   ->   expanded (hover the notch)
- nothing shown        glance strip, or the         full pages: music, system,
- when idle            working dot / now playing    devices, agents
+ nothing shown        glance strip, or the         full pages: music, widgets,
+ when idle            working dot / now playing    system, agents, clipboard
 ```
 
 It stays out of the way: with nothing happening it is invisible, and it never takes over a notch you have open.
@@ -53,11 +54,12 @@ It stays out of the way: with nothing happening it is invisible, and it never ta
 
 ### AI agents, in your terminal or editor
 - **Works with** Claude Code, Codex, GitHub Copilot, and any command-line tool or script that can run `notch.exe` (see [Connect your agents](#connect-your-agents)). It also runs inside VS Code terminals.
-- **Working state:** a dot and a short label appear on the collapsed notch while an agent runs, for example `claude · VS Code`.
+- **Working state:** a dot and a short label appear on the collapsed notch while an agent runs, for example `claude · VS Code`. With several running, the label steps through them every few seconds.
+- **Waiting for you:** when an agent stops to ask for your review or input, its dot turns **green** (on the collapsed notch and on the agents page) while the others stay orange. It turns orange again as soon as it works again.
 - **Finished or stuck:** when a run ends or needs your input, the notch slides out with a **Done** or **Needs attention** popup and a chime. The popup names the agent, the project and the app, for example `Project Notch · VS Code · Task complete`.
 - **Click to jump back:** click the popup and Windows brings the window that agent was running in to the front.
 - **Several at once:** each session is tracked on its own, so two Claude Code windows, or Claude and Codex together, never clear each other. With more than one running it shows `N working`.
-- **Live step feed:** hover the notch while an agent works to see the task you gave it, its latest steps with the current one lit, the elapsed time and the step count.
+- **Agent list:** hover the notch to see every running agent on one page, one row each (`claude · Project Notch · VS Code`) with its elapsed time, or *needs review* in green when it is waiting for you. More than five shows `+N more`.
 - **Interrupted runs** (Esc, errors) are cleared quietly with no false "Done".
 
 ### Music
@@ -68,6 +70,18 @@ It stays out of the way: with nothing happening it is invisible, and it never ta
 - **Widget page (first):** tiles for the temperature, the active connection (Wi-Fi name, signal and speed, or Ethernet) and the battery level of every connected Bluetooth device.
 - **System info page (second):** battery (the icon turns green while the charger is connected), CPU, GPU load, memory, disk and network speed.
 - Pages stack vertically: scroll with the mouse wheel or click the dots. Values only refresh while you are looking at them.
+
+### Clipboard
+The last page keeps a history of what you copy. It lives in memory only: it is gone when you quit the notch, restart or shut down, and nothing is written to disk.
+- **Keeps anything:** text, files, folders and images, with their formatting (HTML, RTF) where the app offered it. Up to 200 items, and nothing over 32 MB. Copying the same thing again moves it to the top.
+- **Search:** click the search box and type. Every word has to match (case does not matter), for file copies against the file path too. **Enter** pastes the top result, **Esc** clears the search.
+- **Date filter:** click the chip to step through *Any date, Today, Yesterday, Last 7 days, Last 30 days*. It combines with the search.
+- **Paste anywhere:** click an item and it is pasted into the window you were just using (it sets the clipboard and presses Ctrl+V for you).
+- **Drag out:** pull an item off the list onto a folder, an editor, a chat box, anything that accepts a drop. It is always a copy.
+- **Drag in:** drag files, text or an image to the top of the screen and the notch opens on this page to take them.
+- **Right-click** an item to delete it, or choose *Clear clipboard history*.
+- **Private copies are skipped:** password managers mark what they copy as private, and the notch honours that. Copies of virtual files (inside a zip, mail attachments) are not kept either.
+- The mouse wheel scrolls the list; at either end it changes page again.
 
 ### Glance strip
 Touch the top edge when nothing else is going on and the notch shows the **time**, the **battery** and the **connection**, plus the **weather** (a condition symbol and temperature in °C) for where you are.
@@ -175,6 +189,7 @@ How: no polling, partial redraw of only the area that changed, no animation whil
 - Everything runs on your machine. The event server binds to `127.0.0.1` only.
 - The only network request the notch makes is the weather lookup to [Open-Meteo](https://open-meteo.com) (no account, no key), every 30 minutes. It sends your position rounded to about 1 km, taken from the Windows location service. If location is off, the weather simply doesn't show.
 - The microphone and camera indicator reads the same Windows privacy log that the taskbar uses. Nothing is recorded or stored.
+- The clipboard history is held in memory only and is never written to disk or sent anywhere.
 - No telemetry, no accounts, nothing written to disk except the start-at-login entry.
 
 ## Project layout
@@ -189,6 +204,9 @@ src/
   devices.rs     Bluetooth devices and their battery levels
   notice.rs      what each system popup says (pure, unit tested)
   watchers.rs    network and volume change notifications
+  clipboard.rs   clipboard history, search and date filter (pure, unit tested)
+  clippage.rs    the clipboard page: drawing, clicks, typing, paste
+  dnd.rs         OLE: system clipboard, drag out and drop in
   weather.rs     location + Open-Meteo, run as a short-lived child
   privacy.rs     microphone / camera in-use watcher
   volume.rs  art.rs  autostart.rs  spring.rs
