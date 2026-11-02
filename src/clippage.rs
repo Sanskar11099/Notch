@@ -16,6 +16,7 @@ pub const PASTE_TIMER_ID: usize = 9; // send Ctrl+V a moment after we set the cl
 pub const WM_CLIPBOARDUPDATE: u32 = 0x031D;
 pub const ID_CLIP_DELETE: usize = 3;
 pub const ID_CLIP_CLEAR: usize = 4;
+pub const ID_CLIP_DELETE_SHOWN: usize = 5;
 const CLIP_DEBOUNCE_MS: u32 = 80;
 const CLIP_RETRY_MS: u32 = 120;
 const CLIP_RETRIES: u8 = 4;
@@ -31,12 +32,14 @@ const LIST_TOP: f32 = 40.0;
 const LIST_L: f32 = 12.0;
 const LIST_R: f32 = 388.0;
 const ROW_H: f32 = 22.0;
+const DEL_L: f32 = 364.0; // the delete cross at the right end of a row (logical px from the pill's left edge)
 const QUERY_TAIL_CHARS: usize = 30; // longer queries show their end, where the caret is
 
 enum Hit {
     Search,
     Chip,
     Row(usize), // visible row, 0 = first on screen
+    Delete(usize), // the cross at the right end of that row
     Nothing,
 }
 
@@ -84,7 +87,8 @@ fn hit(app: &App, x: i32, y: i32) -> Hit {
     } else if inside(CHIP) {
         Hit::Chip
     } else if inside((LIST_L, LIST_TOP, LIST_R, LIST_TOP + ROWS as f32 * ROW_H)) {
-        Hit::Row(((py / s - LIST_TOP) / ROW_H) as usize)
+        let row = ((py / s - LIST_TOP) / ROW_H) as usize;
+        if px >= left + DEL_L * s { Hit::Delete(row) } else { Hit::Row(row) }
     } else {
         Hit::Nothing
     }
@@ -145,7 +149,13 @@ pub unsafe fn draw(app: &App, x: f32, w: f32, s: f32, a: f32) {
             };
             text(app, &app.icons, glyph, &rect(x + (LIST_L + 4.0) * s, top, x + (LIST_L + 26.0) * s, bottom), a * 0.7);
             text(app, &app.row, &item.preview, &rect(x + 40.0 * s, top, x + w - 130.0 * s, bottom), a);
-            text(app, &app.stamp, &when_label(item.at, today), &rect(x + w - 128.0 * s, top, x + w - 34.0 * s, bottom), a * 0.5);
+            // The row under the mouse shows a delete cross in place of the end of its time.
+            let hovered = v.hover == Some(i);
+            let stamp_right = if hovered { x + DEL_L * s - 4.0 * s } else { x + w - 34.0 * s };
+            text(app, &app.stamp, &when_label(item.at, today), &rect(x + w - 128.0 * s, top, stamp_right, bottom), a * 0.5);
+            if hovered {
+                text(app, &app.icons, "\u{E711}", &rect(x + DEL_L * s, top, x + LIST_R * s, bottom), a * 0.85); // Segoe MDL2 Cancel
+            }
         }
         if list.len() > ROWS {
             // A thin scroll thumb in the gap before the page dots.
@@ -174,7 +184,7 @@ pub fn on_mouse_move(hwnd: HWND, lp: LPARAM, left_down: bool) -> bool {
         let mut a = a.borrow_mut();
         let app = a.as_mut()?;
         let now = match hit(app, x, y) {
-            Hit::Row(i) if row_item(app, i).is_some() => Some(i),
+            Hit::Row(i) | Hit::Delete(i) if row_item(app, i).is_some() => Some(i),
             _ => None,
         };
         if app.clip.hover != now {
@@ -232,6 +242,14 @@ pub fn on_click(hwnd: HWND, x: i32, y: i32) -> bool {
                 (Some(id), Some(p)) if p.id == id => Click::Paste(id),
                 _ => Click::Handled,
             },
+            Hit::Delete(i) => {
+                if let Some(id) = row_item(app, i) {
+                    app.clip.store.remove(id);
+                    app.clip.hover = None;
+                    let _ = render(hwnd, app);
+                }
+                Click::Handled
+            }
             Hit::Search => Click::FocusSearch,
             Hit::Chip => {
                 app.clip.range = app.clip.range.next();
@@ -485,18 +503,35 @@ pub fn dropped(hwnd: HWND, formats: Vec<crate::clipboard::Format>) {
     unsafe { SetTimer(Some(hwnd), HOLD_TIMER_ID, DROP_HOLD_MS, None) }; // then it collapses like any popup
 }
 
-/// What a right-click at (x, y) offers: the item under it, and whether "clear all" makes sense.
-pub fn menu_context(x: i32, y: i32) -> (Option<u64>, bool) {
+/// What a right-click at (x, y) offers: the item under it, whether "clear all" makes sense, and how many items the
+/// current search or date filter shows (0 when none is set, since then "shown" would just be "all").
+pub fn menu_context(x: i32, y: i32) -> (Option<u64>, bool, usize) {
     APP.with(|a| match a.borrow().as_ref() {
         Some(app) => {
             let item = match hit(app, x, y) {
-                Hit::Row(i) => row_item(app, i),
+                Hit::Row(i) | Hit::Delete(i) => row_item(app, i),
                 _ => None,
             };
-            (item, live(app) && !app.clip.store.is_empty())
+            let v = &app.clip;
+            let filtered = !v.search.text.trim().is_empty() || v.range != DateRange::Any;
+            let shown = if live(app) && filtered { v.store.matches(&v.search.text, v.range, Stamp::now().days()).len() } else { 0 };
+            (item, live(app) && !v.store.is_empty(), shown)
         }
-        None => (None, false),
+        None => (None, false, 0),
     })
+}
+
+/// Delete everything the current search and date filter show.
+pub fn delete_shown(hwnd: HWND) {
+    APP.with(|a| {
+        if let Some(app) = a.borrow_mut().as_mut() {
+            let v = &mut app.clip;
+            v.store.remove_matching(&v.search.text, v.range, Stamp::now().days());
+            v.scroll = 0;
+            v.hover = None;
+            let _ = render(hwnd, app);
+        }
+    });
 }
 
 pub fn delete(hwnd: HWND, id: u64) {

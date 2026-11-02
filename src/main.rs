@@ -1591,16 +1591,20 @@ fn on_timer(hwnd: HWND) {
 }
 
 /// The right-click menu. On the clipboard page it also offers to delete the item under the cursor or clear the history.
-fn show_menu(hwnd: HWND, clip_item: Option<u64>, can_clear: bool) {
+fn show_menu(hwnd: HWND, clip_item: Option<u64>, can_clear: bool, shown: usize) {
     unsafe {
         let Ok(menu) = CreatePopupMenu() else { return };
         if clip_item.is_some() {
             let _ = AppendMenuW(menu, MF_STRING, clippage::ID_CLIP_DELETE, w!("Delete this item"));
         }
+        if shown > 0 {
+            let label: Vec<u16> = format!("Delete the {shown} shown item{}", if shown == 1 { "" } else { "s" }).encode_utf16().chain([0]).collect();
+            let _ = AppendMenuW(menu, MF_STRING, clippage::ID_CLIP_DELETE_SHOWN, PCWSTR(label.as_ptr()));
+        }
         if can_clear {
             let _ = AppendMenuW(menu, MF_STRING, clippage::ID_CLIP_CLEAR, w!("Clear clipboard history"));
         }
-        if clip_item.is_some() || can_clear {
+        if clip_item.is_some() || can_clear || shown > 0 {
             let _ = AppendMenuW(menu, MF_SEPARATOR, 0, None);
         }
         let login_flags = if autostart::is_enabled() { MF_STRING | MF_CHECKED } else { MF_STRING };
@@ -1620,6 +1624,7 @@ fn show_menu(hwnd: HWND, clip_item: Option<u64>, can_clear: bool) {
                     clippage::delete(hwnd, id);
                 }
             }
+            clippage::ID_CLIP_DELETE_SHOWN => clippage::delete_shown(hwnd),
             clippage::ID_CLIP_CLEAR => clippage::clear(hwnd),
             _ => {}
         }
@@ -1838,8 +1843,8 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
         }
         WM_RBUTTONUP => {
             let (x, y) = ((lp.0 & 0xFFFF) as i16 as i32, ((lp.0 >> 16) & 0xFFFF) as i16 as i32);
-            let (item, can_clear) = clippage::menu_context(x, y);
-            show_menu(hwnd, item, can_clear);
+            let (item, can_clear, shown) = clippage::menu_context(x, y);
+            show_menu(hwnd, item, can_clear, shown);
             LRESULT(0)
         }
         WM_CHAR => {

@@ -79,7 +79,7 @@ The last page keeps a history of what you copy. It lives in memory only: it is g
 - **Paste anywhere:** click an item and it is pasted into the window you were just using (it sets the clipboard and presses Ctrl+V for you).
 - **Drag out:** pull an item off the list onto a folder, an editor, a chat box, anything that accepts a drop. It is always a copy.
 - **Drag in:** drag files, text or an image to the top of the screen and the notch opens on this page to take them.
-- **Right-click** an item to delete it, or choose *Clear clipboard history*.
+- **Delete what you want:** hover a row and click the **×** at its end to remove that item. Right-click for more: *Delete this item*, *Delete the N shown items* (everything your current search and date filter show, handy for clearing all copies of something), or *Clear clipboard history*.
 - **Private copies are skipped:** password managers mark what they copy as private, and the notch honours that. Copies of virtual files (inside a zip, mail attachments) are not kept either.
 - The mouse wheel scrolls the list; at either end it changes page again.
 

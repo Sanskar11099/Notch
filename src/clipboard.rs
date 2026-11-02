@@ -227,6 +227,13 @@ impl Store {
         self.items.clear();
     }
 
+    /// Delete everything `matches` would list for this search and date filter. Returns how many went.
+    pub fn remove_matching(&mut self, query: &str, range: DateRange, today: i32) -> usize {
+        let ids: Vec<u64> = self.matches(query, range, today).iter().map(|i| i.id).collect();
+        self.items.retain(|i| !ids.contains(&i.id));
+        ids.len()
+    }
+
     pub fn is_empty(&self) -> bool {
         self.items.is_empty()
     }
@@ -401,6 +408,22 @@ mod tests {
         assert_eq!(today_only.len(), 1);
         assert_eq!(today_only[0].preview, "new note");
         assert!(store.matches("old", DateRange::Week, today).is_empty());
+    }
+
+    #[test]
+    fn deleting_the_shown_items_keeps_the_rest() {
+        let mut store = Store::default();
+        store.add(text("keep me"), stamp(2026, 11, 2, 600));
+        store.add(text("secret one"), stamp(2026, 11, 2, 601));
+        store.add(text("secret two"), stamp(2026, 10, 1, 602));
+        let today = stamp(2026, 11, 2, 900).days();
+        assert_eq!(store.remove_matching("secret", DateRange::Today, today), 1); // only today's secret
+        assert_eq!(store.matches("", DateRange::Any, today).len(), 2);
+        assert_eq!(store.remove_matching("secret", DateRange::Any, today), 1);
+        assert_eq!(store.matches("", DateRange::Any, today)[0].preview, "keep me");
+        let id = store.matches("", DateRange::Any, today)[0].id;
+        store.remove(id);
+        assert!(store.is_empty());
     }
 
     #[test]
